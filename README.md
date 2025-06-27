@@ -1,10 +1,18 @@
-# PWA de Teste com Notificações Push
+# PWA de Notificações com MongoDB
 
-Este é um PWA simples para testar notificações push no iPhone.
+Este é um PWA para notificações push integrado com MongoDB para persistência de dados.
 
-## Configuração
+## Tecnologias
 
-1. Primeiro, instale as dependências:
+- Node.js
+- Express
+- MongoDB
+- Web Push
+- Service Workers
+
+## Configuração Local
+
+1. Instale as dependências:
 
 ```bash
 npm install
@@ -16,32 +24,46 @@ npm install
 npx web-push generate-vapid-keys
 ```
 
-3. Substitua as chaves VAPID no arquivo `server.js` com as suas chaves geradas e atualize o email.
+3. Configure as variáveis de ambiente no Railway ou crie um arquivo `.env` local:
 
-4. Inicie o servidor:
-
-```bash
-npm start
+```env
+MONGODB_URI=sua_url_do_mongodb
+VAPID_PUBLIC_KEY=sua_chave_publica
+VAPID_PRIVATE_KEY=sua_chave_privada
+VAPID_EMAIL=seu_email
 ```
 
-5. Acesse a aplicação em `http://localhost:3000`
+4. Para desenvolvimento local:
+
+```bash
+npm run dev
+```
+
+## Deploy no Railway
+
+1. Conecte seu repositório ao Railway
+2. Configure as variáveis de ambiente no Railway:
+   - MONGODB_URI
+   - VAPID_PUBLIC_KEY
+   - VAPID_PRIVATE_KEY
+   - VAPID_EMAIL
+3. O deploy será automático após cada push
 
 ## Uso no iPhone
 
-1. Abra o Safari e acesse a URL do seu servidor
+1. Abra o Safari e acesse a URL do seu app
 2. Toque no ícone de compartilhamento
 3. Selecione "Adicionar à Tela de Início"
-4. Dê um nome ao atalho e confirme
-5. Abra o app pela tela inicial
-6. Clique em "Ativar Notificações" para permitir notificações push
+4. Abra o app pela tela inicial
+5. Clique em "Ativar Notificações"
 
 ## Testando Notificações
 
 Para testar o envio de notificações manualmente, acesse:
-`http://localhost:3000/api/send-notification`
+`/api/send-notification`
 
 ## Observações
 
-- Certifique-se de que seu servidor está acessível via HTTPS para produção
-- Para desenvolvimento local, o HTTP funcionará
-- As notificações push no iOS têm algumas limitações em comparação com Android
+- O servidor usa MongoDB para armazenar as subscrições de forma persistente
+- As notificações são verificadas a cada hora para remover subscrições inválidas
+- O sistema é otimizado para deploy no Railway

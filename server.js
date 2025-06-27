@@ -1,12 +1,33 @@
 const express = require("express");
 const webpush = require("web-push");
 const path = require("path");
-const fs = require("fs");
+const { MongoClient } = require("mongodb");
 const app = express();
 
 // Middleware para processar JSON
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "/")));
+
+// URL de conexão do MongoDB
+const mongoUrl =
+  "mongodb://mongo:DbrjgxDIdlMHsbmekuKThXonKKnFDAZu@tramway.proxy.rlwy.net:45300";
+let db;
+let subscriptionsCollection;
+
+// Conectar ao MongoDB
+async function connectToMongo() {
+  try {
+    const client = await MongoClient.connect(mongoUrl);
+    db = client.db("pwa_notifications");
+    subscriptionsCollection = db.collection("subscriptions");
+    console.log("Conectado ao MongoDB com sucesso!");
+  } catch (error) {
+    console.error("Erro ao conectar ao MongoDB:", error);
+    process.exit(1);
+  }
+}
+
+// Iniciar conexão com MongoDB
+connectToMongo();
 
 // Gerar VAPID keys usando webpush.generateVAPIDKeys() e substituir estas chaves
 const vapidKeys = {
@@ -21,35 +42,6 @@ webpush.setVapidDetails(
   vapidKeys.privateKey
 );
 
-// Arquivo para persistir subscrições
-const SUBSCRIPTION_FILE = path.join(__dirname, "subscriptions.json");
-
-// Carregar subscrições do arquivo
-function loadSubscriptions() {
-  try {
-    if (fs.existsSync(SUBSCRIPTION_FILE)) {
-      const data = fs.readFileSync(SUBSCRIPTION_FILE, "utf8");
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    logDebug("Erro ao carregar subscrições:", error);
-  }
-  return [];
-}
-
-// Salvar subscrições no arquivo
-function saveSubscriptions(subscriptions) {
-  try {
-    fs.writeFileSync(SUBSCRIPTION_FILE, JSON.stringify(subscriptions, null, 2));
-    logDebug("Subscrições salvas com sucesso");
-  } catch (error) {
-    logDebug("Erro ao salvar subscrições:", error);
-  }
-}
-
-// Array para armazenar múltiplas subscrições
-let subscriptions = loadSubscriptions();
-
 // Log para debug
 function logDebug(message, data = null) {
   const timestamp = new Date().toISOString();
@@ -59,125 +51,141 @@ function logDebug(message, data = null) {
   }
 }
 
-// Função para limpar subscrições inválidas
-function removeInvalidSubscription(invalidSubscription) {
-  subscriptions = subscriptions.filter(
-    (sub) => sub.endpoint !== invalidSubscription.endpoint
-  );
-  saveSubscriptions(subscriptions);
-  logDebug("Subscrição inválida removida:", invalidSubscription.endpoint);
+// Função para remover uma subscrição inválida
+async function removeInvalidSubscription(subscription) {
+  try {
+    const timestamp = new Date().toISOString();
+    logDebug(
+      `[${timestamp}] Removendo subscrição inválida:`,
+      subscription.endpoint
+    );
+
+    await subscriptionsCollection.deleteOne({
+      endpoint: subscription.endpoint,
+    });
+    logDebug(`[${timestamp}] Subscrição removida com sucesso`);
+  } catch (error) {
+    logDebug("Erro ao remover subscrição:", error);
+  }
 }
 
 // Função para testar se uma subscrição ainda é válida
 async function testSubscription(subscription) {
+  const timestamp = new Date().toISOString();
   try {
+    logDebug(`[${timestamp}] Testando subscrição:`, subscription.endpoint);
+
     const testPayload = JSON.stringify({
       title: "Teste de Validação",
       body: "Verificando se a subscrição ainda está ativa",
-      silent: true, // Notificação silenciosa para não incomodar
+      silent: true,
     });
 
     await webpush.sendNotification(subscription, testPayload);
+    logDebug(`[${timestamp}] Teste bem sucedido para:`, subscription.endpoint);
     return true;
   } catch (error) {
+    logDebug(`[${timestamp}] Erro ao testar subscrição:`, {
+      endpoint: subscription.endpoint,
+      errorCode: error.statusCode,
+      errorMessage: error.message,
+    });
+
     if (error.statusCode === 410 || error.statusCode === 413) {
-      // Subscrição expirada ou inválida
-      removeInvalidSubscription(subscription);
+      await removeInvalidSubscription(subscription);
       return false;
     }
-    logDebug("Erro ao testar subscrição:", error);
     return false;
   }
 }
 
-// Verificar e limpar subscrições inválidas periodicamente (a cada 6 horas)
+// Verificar subscrições periodicamente
 setInterval(async () => {
-  logDebug("Iniciando verificação de subscrições...");
-  const validSubscriptions = [];
+  try {
+    const timestamp = new Date().toISOString();
+    logDebug(`[${timestamp}] Iniciando verificação de subscrições...`);
 
-  for (const subscription of subscriptions) {
-    const isValid = await testSubscription(subscription);
-    if (isValid) {
-      validSubscriptions.push(subscription);
+    const subscriptions = await subscriptionsCollection.find({}).toArray();
+    logDebug(
+      `Total de subscrições antes da verificação: ${subscriptions.length}`
+    );
+
+    for (const subscription of subscriptions) {
+      await testSubscription(subscription);
     }
-  }
 
-  if (validSubscriptions.length !== subscriptions.length) {
-    subscriptions = validSubscriptions;
-    saveSubscriptions(subscriptions);
-    logDebug(`Limpeza concluída. Subscrições ativas: ${subscriptions.length}`);
+    const remainingSubscriptions =
+      await subscriptionsCollection.countDocuments();
+    logDebug(
+      `[${timestamp}] Verificação concluída. Subscrições ativas: ${remainingSubscriptions}`
+    );
+  } catch (error) {
+    logDebug("Erro durante verificação periódica:", error);
   }
-}, 6 * 60 * 60 * 1000); // 6 horas
+}, 60 * 60 * 1000); // Verificar a cada 1 hora
+
+// Endpoint para verificar status da subscrição
+app.get("/api/subscription-status", async (req, res) => {
+  try {
+    const count = await subscriptionsCollection.countDocuments();
+    logDebug(`Status das subscrições: ${count} ativas`);
+    res.json({
+      activeSubscriptions: count,
+      hasSubscriptions: count > 0,
+    });
+  } catch (error) {
+    logDebug("Erro ao verificar status das subscrições:", error);
+    res.status(500).json({ error: "Erro interno do servidor" });
+  }
+});
 
 app.get("/api/vapid-public-key", (req, res) => {
-  logDebug("Chave VAPID pública solicitada");
   res.send(vapidKeys.publicKey);
 });
 
-// Endpoint para verificar status da subscrição
-app.get("/api/subscription-status", (req, res) => {
-  logDebug(`Status das subscrições: ${subscriptions.length} ativas`);
-  res.json({
-    activeSubscriptions: subscriptions.length,
-    hasSubscriptions: subscriptions.length > 0,
-  });
-});
+app.post("/api/subscribe", async (req, res) => {
+  try {
+    const subscription = req.body;
+    logDebug("Nova subscrição recebida:", subscription);
 
-app.post("/api/subscribe", (req, res) => {
-  const newSubscription = req.body;
-  logDebug("Nova subscrição recebida:", newSubscription);
+    // Verificar se já existe e atualizar/inserir
+    await subscriptionsCollection.updateOne(
+      { endpoint: subscription.endpoint },
+      { $set: subscription },
+      { upsert: true }
+    );
 
-  // Verificar se a subscrição já existe
-  const existingIndex = subscriptions.findIndex(
-    (sub) => sub.endpoint === newSubscription.endpoint
-  );
+    logDebug("Subscrição salva no MongoDB");
 
-  if (existingIndex !== -1) {
-    // Atualizar subscrição existente
-    subscriptions[existingIndex] = newSubscription;
-    logDebug("Subscrição atualizada");
-  } else {
-    // Adicionar nova subscrição
-    subscriptions.push(newSubscription);
-    logDebug("Nova subscrição adicionada");
-  }
-
-  // Salvar no arquivo
-  saveSubscriptions(subscriptions);
-
-  // Teste imediato da subscrição
-  const testPayload = JSON.stringify({
-    title: "Teste de Conexão",
-    body: "Sua conexão para notificações está funcionando!",
-  });
-
-  webpush
-    .sendNotification(newSubscription, testPayload)
-    .then(() => {
-      logDebug("Notificação de teste enviada com sucesso");
-      res
-        .status(201)
-        .json({ message: "Subscrição registrada e testada com sucesso" });
-    })
-    .catch((error) => {
-      logDebug("Erro ao enviar notificação de teste:", error);
-      if (error.statusCode === 410) {
-        removeInvalidSubscription(newSubscription);
-      }
-      res
-        .status(201)
-        .json({ message: "Subscrição registrada, mas teste falhou" });
+    // Enviar notificação de teste
+    const testPayload = JSON.stringify({
+      title: "Teste de Conexão",
+      body: "Sua conexão para notificações está funcionando!",
     });
+
+    await webpush.sendNotification(subscription, testPayload);
+    logDebug("Notificação de teste enviada com sucesso");
+    res
+      .status(201)
+      .json({ message: "Subscrição registrada e testada com sucesso" });
+  } catch (error) {
+    logDebug("Erro ao processar subscrição:", error);
+    if (error.statusCode === 410) {
+      await removeInvalidSubscription(req.body);
+    }
+    res.status(500).json({ error: "Erro ao processar subscrição" });
+  }
 });
 
 // Webhook para receber notificações do gateway
 app.post("/webhook", async (req, res) => {
   try {
     logDebug("Webhook recebido:", req.body);
-
     const data = req.body;
 
-    // Verifica se há subscrições ativas
+    // Buscar todas as subscrições ativas
+    const subscriptions = await subscriptionsCollection.find({}).toArray();
+
     if (subscriptions.length === 0) {
       logDebug("Erro: Nenhuma subscrição encontrada");
       return res.status(400).json({ error: "Nenhuma subscrição encontrada" });
@@ -205,7 +213,7 @@ app.post("/webhook", async (req, res) => {
         } catch (pushError) {
           logDebug("Erro ao enviar push:", pushError);
           if (pushError.statusCode === 410) {
-            removeInvalidSubscription(subscription);
+            await removeInvalidSubscription(subscription);
           }
           return { success: false, subscription, error: pushError };
         }
@@ -217,7 +225,6 @@ app.post("/webhook", async (req, res) => {
       logDebug(`Notificações enviadas: ${successful}/${subscriptions.length}`);
       res.status(200).send("OK");
     } else {
-      // Se não for aprovada, apenas retorna OK sem enviar notificação
       res.status(200).send("OK");
     }
   } catch (err) {
@@ -228,26 +235,28 @@ app.post("/webhook", async (req, res) => {
 
 // Rota para enviar notificação manualmente (para testes)
 app.get("/api/send-notification", async (req, res) => {
-  if (subscriptions.length === 0) {
-    logDebug("Erro: Tentativa de envio manual sem subscrições");
-    return res.status(400).json({ error: "Nenhuma subscrição encontrada" });
-  }
-
-  const payload = JSON.stringify({
-    title: "Checkoutinho",
-    body: "Notificação manual enviada com sucesso!",
-  });
-
-  logDebug("Enviando notificação manual:", { payload });
-
   try {
+    const subscriptions = await subscriptionsCollection.find({}).toArray();
+
+    if (subscriptions.length === 0) {
+      logDebug("Erro: Tentativa de envio manual sem subscrições");
+      return res.status(400).json({ error: "Nenhuma subscrição encontrada" });
+    }
+
+    const payload = JSON.stringify({
+      title: "Checkoutinho",
+      body: "Notificação manual enviada com sucesso!",
+    });
+
+    logDebug("Enviando notificação manual:", { payload });
+
     const sendPromises = subscriptions.map(async (subscription) => {
       try {
         await webpush.sendNotification(subscription, payload);
         return { success: true };
       } catch (error) {
         if (error.statusCode === 410) {
-          removeInvalidSubscription(subscription);
+          await removeInvalidSubscription(subscription);
         }
         return { success: false, error };
       }
@@ -266,8 +275,10 @@ app.get("/api/send-notification", async (req, res) => {
   }
 });
 
+// Servir arquivos estáticos
+app.use(express.static(__dirname));
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  logDebug(`Servidor rodando na porta ${PORT}`);
-  logDebug(`Subscrições carregadas: ${subscriptions.length}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });

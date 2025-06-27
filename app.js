@@ -45,8 +45,9 @@ async function checkSubscriptionHealth() {
       isSubscribed = false;
       subscribeButton.disabled = false;
       updateSubscriptionStatus(
-        "Subscrição perdida. Clique para reativar as notificações."
+        "Subscrição perdida. Tentando reativar automaticamente..."
       );
+      await resubscribe();
       return;
     }
 
@@ -56,24 +57,56 @@ async function checkSubscriptionHealth() {
 
     if (!status.hasSubscriptions) {
       console.log("Nenhuma subscrição ativa no servidor, re-subscrevendo...");
+      updateSubscriptionStatus("Reativando subscrição automaticamente...");
       await resubscribe();
+    } else {
+      console.log("Subscrição está saudável");
+      updateSubscriptionStatus("Notificações ativas e funcionando");
     }
   } catch (error) {
     console.error("Erro na verificação de saúde da subscrição:", error);
+    // Não desativa a subscrição em caso de erro de rede
+    if (error.name !== "TypeError" && error.name !== "NetworkError") {
+      isSubscribed = false;
+      subscribeButton.disabled = false;
+      updateSubscriptionStatus(
+        "Erro na verificação. Clique para tentar novamente."
+      );
+    }
   }
 }
 
 // Re-subscrever automaticamente
 async function resubscribe() {
-  try {
-    updateSubscriptionStatus("Reativando notificações...");
-    await subscribeToPushNotifications();
-  } catch (error) {
-    console.error("Erro ao re-subscrever:", error);
-    isSubscribed = false;
-    subscribeButton.disabled = false;
-    updateSubscriptionStatus("Erro ao reativar notificações. Tente novamente.");
+  let retryCount = 0;
+  const maxRetries = 3;
+
+  while (retryCount < maxRetries) {
+    try {
+      updateSubscriptionStatus(
+        `Tentativa ${retryCount + 1} de reativar notificações...`
+      );
+      await subscribeToPushNotifications();
+      console.log("Resubscrição bem sucedida");
+      return;
+    } catch (error) {
+      console.error(
+        `Erro na tentativa ${retryCount + 1} de resubscrever:`,
+        error
+      );
+      retryCount++;
+      if (retryCount < maxRetries) {
+        // Esperar um pouco antes de tentar novamente (exponential backoff)
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 * Math.pow(2, retryCount))
+        );
+      }
+    }
   }
+
+  isSubscribed = false;
+  subscribeButton.disabled = false;
+  updateSubscriptionStatus("Não foi possível reativar. Tente manualmente.");
 }
 
 async function subscribeToPushNotifications() {
