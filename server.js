@@ -194,17 +194,33 @@ app.post("/webhook", async (req, res) => {
     logDebug(`Enviando para ${subscriptions.length} subscrições`);
 
     const comissao = (data.result / 100).toFixed(2).replace(".", ",");
+    let notificationData;
 
-    // Só enviar notificação se a venda for aprovada
+    // Enviar notificação baseada no status
     if (data.status === "completed") {
-      const payload = JSON.stringify({
+      notificationData = {
         title: `Venda Aprovada 🔥`,
         body: `Sua comissão » R$ ${comissao}`,
+        icon: "/icons/icon-192x192.png",
+        badge: "/icons/icon-192x192.png",
         sound: "/sound/CashRegister.mp3",
         vibrate: [100, 50, 100],
         requireInteraction: true,
-      });
+      };
+    } else if (data.status === "pending" || !data.status) {
+      notificationData = {
+        title: `Nova Venda Pendente 🕒`,
+        body: `Possível comissão » R$ ${comissao}`,
+        icon: "/icons/icon-192x192.png",
+        badge: "/icons/icon-192x192.png",
+        sound: "/sound/CashRegister.mp3",
+        vibrate: [100, 50, 100],
+        requireInteraction: true,
+      };
+    }
 
+    if (notificationData) {
+      const payload = JSON.stringify(notificationData);
       logDebug("Tentando enviar notificação com payload:", payload);
 
       // Enviar para todas as subscrições ativas
@@ -226,10 +242,9 @@ app.post("/webhook", async (req, res) => {
       const successful = results.filter((r) => r.success).length;
 
       logDebug(`Notificações enviadas: ${successful}/${subscriptions.length}`);
-      res.status(200).send("OK");
-    } else {
-      res.status(200).send("OK");
     }
+
+    res.status(200).send("OK");
   } catch (err) {
     logDebug("Erro no webhook:", err);
     res.status(500).send("Erro interno");
@@ -246,11 +261,18 @@ app.get("/api/send-notification", async (req, res) => {
       return res.status(400).json({ error: "Nenhuma subscrição encontrada" });
     }
 
-    const payload = JSON.stringify({
-      title: "Checkoutinho",
-      body: "Notificação manual enviada com sucesso!",
-    });
+    // Simular uma venda pendente para teste
+    const notificationData = {
+      title: "Venda Pendente (Teste) 🕒",
+      body: "Possível comissão » R$ 50,00",
+      icon: "/icons/icon-192x192.png",
+      badge: "/icons/icon-192x192.png",
+      sound: "/sound/CashRegister.mp3",
+      vibrate: [100, 50, 100],
+      requireInteraction: true,
+    };
 
+    const payload = JSON.stringify(notificationData);
     logDebug("Enviando notificação manual:", { payload });
 
     const sendPromises = subscriptions.map(async (subscription) => {
@@ -258,6 +280,7 @@ app.get("/api/send-notification", async (req, res) => {
         await webpush.sendNotification(subscription, payload);
         return { success: true };
       } catch (error) {
+        logDebug("Erro ao enviar notificação:", error);
         if (error.statusCode === 410) {
           await removeInvalidSubscription(subscription);
         }

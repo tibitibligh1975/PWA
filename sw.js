@@ -30,38 +30,9 @@ self.addEventListener("push", (event) => {
   console.log("[ServiceWorker] Push recebido");
   console.log("[ServiceWorker] Dados Push:", event.data?.text());
 
-  let notificationData = {
-    title: "Nova Notificação",
-    body: "Sem conteúdo",
-    icon: "/icons/icon-192x192.png",
-    badge: "/icons/icon-192x192.png",
-    vibrate: [100, 50, 100],
-    sound: "/sound/CashRegister.mp3",
-    data: {
-      dateOfArrival: Date.now(),
-      primaryKey: 1,
-    },
-    requireInteraction: true,
-    tag: "checkoutinho-notification",
-    actions: [
-      {
-        action: "open",
-        title: "Abrir",
-      },
-      {
-        action: "close",
-        title: "Fechar",
-      },
-    ],
-  };
-
   try {
     const payload = event.data.json();
-    notificationData = {
-      ...notificationData,
-      ...payload,
-    };
-    console.log("[ServiceWorker] Dados da notificação:", notificationData);
+    console.log("[ServiceWorker] Dados da notificação:", payload);
 
     if (payload.silent) {
       console.log(
@@ -69,29 +40,67 @@ self.addEventListener("push", (event) => {
       );
       return;
     }
+
+    // Garantir que todos os campos necessários estejam presentes
+    const notificationData = {
+      ...payload,
+      icon: payload.icon || "/icons/icon-192x192.png",
+      badge: payload.badge || "/icons/icon-192x192.png",
+      vibrate: payload.vibrate || [100, 50, 100],
+      requireInteraction: true,
+      tag: "checkoutinho-notification",
+      actions: [
+        {
+          action: "open",
+          title: "Abrir",
+        },
+        {
+          action: "close",
+          title: "Fechar",
+        },
+      ],
+    };
+
+    event.waitUntil(
+      (async () => {
+        try {
+          // Tocar o som se estiver presente no payload
+          if (payload.sound) {
+            try {
+              const audio = new Audio(payload.sound);
+              await audio.play();
+              console.log("[ServiceWorker] Som reproduzido com sucesso");
+            } catch (audioError) {
+              console.error("[ServiceWorker] Erro ao tocar som:", audioError);
+              // Continua mesmo se o som falhar
+            }
+          }
+
+          // Mostrar a notificação
+          await self.registration.showNotification(
+            notificationData.title,
+            notificationData
+          );
+          console.log("[ServiceWorker] Notificação mostrada com sucesso");
+        } catch (error) {
+          console.error(
+            "[ServiceWorker] Erro ao processar notificação:",
+            error
+          );
+        }
+      })()
+    );
   } catch (e) {
     console.error("[ServiceWorker] Erro ao processar payload:", e);
-    notificationData.body = event.data.text();
+    // Se não conseguir processar o JSON, mostra uma notificação simples
+    event.waitUntil(
+      self.registration.showNotification("Nova Notificação", {
+        body: event.data.text(),
+        icon: "/icons/icon-192x192.png",
+        badge: "/icons/icon-192x192.png",
+      })
+    );
   }
-
-  event.waitUntil(
-    (async () => {
-      try {
-        // Tocar o som antes de mostrar a notificação
-        const audio = new Audio("/sound/CashRegister.mp3");
-        await audio.play();
-
-        // Mostrar a notificação
-        await self.registration.showNotification(
-          notificationData.title,
-          notificationData
-        );
-        console.log("[ServiceWorker] Notificação mostrada com sucesso");
-      } catch (error) {
-        console.error("[ServiceWorker] Erro ao processar notificação:", error);
-      }
-    })()
-  );
 });
 
 self.addEventListener("notificationclick", (event) => {
