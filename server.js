@@ -200,6 +200,9 @@ app.post("/webhook", async (req, res) => {
       const payload = JSON.stringify({
         title: `Venda Aprovada 🔥`,
         body: `Sua comissão » R$ ${comissao}`,
+        sound: "/sound/CashRegister.mp3",
+        vibrate: [100, 50, 100],
+        requireInteraction: true,
       });
 
       logDebug("Tentando enviar notificação com payload:", payload);

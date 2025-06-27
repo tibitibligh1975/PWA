@@ -7,6 +7,7 @@
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
     <meta name="theme-color" content="#2196F3" />
+    <link rel="preload" href="/sound/CashRegister.mp3" as="audio" />
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -35,6 +36,9 @@
         border: 1px solid #ccc;
         min-height: 100px;
       }
+      .audio-test {
+        margin-top: 20px;
+      }
     </style>
   </head>
   <body>
@@ -43,7 +47,18 @@
     <div id="messages">
       <p>Clique no botão acima para ativar as notificações</p>
     </div>
+    <div class="audio-test">
+      <button onclick="testSound()">Testar Som</button>
+    </div>
 
+    <script>
+      function testSound() {
+        const audio = new Audio("/sound/CashRegister.mp3");
+        audio.play().catch((error) => {
+          console.error("Erro ao tocar som:", error);
+        });
+      }
+    </script>
     <script src="/app.js"></script>
   </body>
 </html>

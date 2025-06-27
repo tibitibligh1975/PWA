@@ -36,12 +36,23 @@ self.addEventListener("push", (event) => {
     icon: "/icons/icon-192x192.png",
     badge: "/icons/icon-192x192.png",
     vibrate: [100, 50, 100],
+    sound: "/sound/CashRegister.mp3",
     data: {
       dateOfArrival: Date.now(),
       primaryKey: 1,
     },
     requireInteraction: true,
     tag: "checkoutinho-notification",
+    actions: [
+      {
+        action: "open",
+        title: "Abrir",
+      },
+      {
+        action: "close",
+        title: "Fechar",
+      },
+    ],
   };
 
   try {
@@ -64,20 +75,32 @@ self.addEventListener("push", (event) => {
   }
 
   event.waitUntil(
-    self.registration
-      .showNotification(notificationData.title, notificationData)
-      .then(() => {
+    (async () => {
+      try {
+        // Tocar o som antes de mostrar a notificação
+        const audio = new Audio("/sound/CashRegister.mp3");
+        await audio.play();
+
+        // Mostrar a notificação
+        await self.registration.showNotification(
+          notificationData.title,
+          notificationData
+        );
         console.log("[ServiceWorker] Notificação mostrada com sucesso");
-      })
-      .catch((error) => {
-        console.error("[ServiceWorker] Erro ao mostrar notificação:", error);
-      })
+      } catch (error) {
+        console.error("[ServiceWorker] Erro ao processar notificação:", error);
+      }
+    })()
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   console.log("[ServiceWorker] Notificação clicada");
   event.notification.close();
+
+  if (event.action === "close") {
+    return;
+  }
 
   event.waitUntil(
     clients
